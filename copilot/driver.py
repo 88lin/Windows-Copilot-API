@@ -69,18 +69,25 @@ class Copilot(AbstractProvider):
         if access_token is None and conversation is not None:
             access_token = conversation.access_token
 
+        # Auth model mirrors the browser:
+        #   * REST calls (conversation create, attachment upload) authenticate by
+        #     COOKIE only. Sending the token as an Authorization: Bearer header
+        #     there gets a 401 (browsers never do it), so we don't.
+        #   * the chat WebSocket carries the signed-in identity via its
+        #     ?accessToken= param. This must be the Copilot chat token (MSAL scope
+        #     ChatAI.ReadWrite, selected in browser._FIND_TOKEN_JS): a
+        #     wrong-audience token 401s the WS upgrade, while *no* token makes the
+        #     chat backend treat the session as anonymous -> chat-service-
+        #     unavailable in geo-restricted regions (e.g. India).
         websocket_url = self.websocket_url
-        headers = None
         if access_token:
             websocket_url = f"{websocket_url}&accessToken={quote(access_token)}"
-            headers = {"authorization": f"Bearer {access_token}"}
 
         with Session(
             timeout=timeout,
             proxy=proxy,
             impersonate="chrome",
             cookies=cookies,
-            headers=headers,
         ) as session:
             # Establish cookies + Cloudflare clearance (anonymous is fine).
             session.get(f"{self.url}/")

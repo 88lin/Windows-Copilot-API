@@ -58,18 +58,32 @@ async () => {
 }
 """
 
-# Best-effort discovery of an MSAL access token from localStorage. Returns null
-# for anonymous sessions (anonymous chat may still work via cookies alone).
+# Discover the Copilot chat MSAL access token from localStorage. The cache holds
+# several tokens for different scopes; the chat WebSocket only accepts the one
+# scoped 'ChatAI.ReadWrite' — a wrong-audience token (e.g. the Graph
+# User.Read/Files.Read token) makes the WS upgrade 401. We therefore PREFER the
+# ChatAI token and only fall back to the first token found if none matches.
+# Returns null for anonymous sessions (anonymous chat may still work via cookies).
 _FIND_TOKEN_JS = """
 () => {
   try {
+    let fallback = null;
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       const v = localStorage.getItem(k);
       if (v && v.indexOf('"credentialType":"AccessToken"') !== -1) {
-        try { const o = JSON.parse(v); if (o && o.secret) return o.secret; } catch (e) {}
+        try {
+          const o = JSON.parse(v);
+          if (o && o.secret) {
+            // Match the chat scope (e.g. '<resource>/ChatAI.ReadWrite'); take the
+            // first non-matching token only as a last-resort fallback.
+            if (o.target && o.target.indexOf('ChatAI') !== -1) return o.secret;
+            if (!fallback) fallback = o.secret;
+          }
+        } catch (e) {}
       }
     }
+    return fallback;
   } catch (e) {}
   return null;
 }
